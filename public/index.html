@@ -49,6 +49,11 @@
       cursor: pointer;
     }
 
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
     .record {
       padding: 12px 0;
       border-bottom: 1px solid #ddd;
@@ -57,33 +62,50 @@
     #message {
       font-size: 14px;
     }
+
+    #connection-status {
+      font-size: 14px;
+      color: #64748b;
+    }
   </style>
 </head>
 
 <body>
   <h1>Aircraft Log</h1>
   <p>A simple journal for recording the aircraft you spot.</p>
+  <p id="connection-status">Connecting to server...</p>
 
   <section>
     <h2>Add a new sighting</h2>
 
     <form id="sighting-form">
       <label for="aircraft">Aircraft model *</label>
-      <input id="aircraft" name="aircraft"
-        placeholder="e.g. Boeing 777-300ER" required>
+      <input
+        id="aircraft"
+        name="aircraft"
+        placeholder="e.g. Boeing 777-300ER"
+        required
+      >
 
       <label for="airport">Airport *</label>
-      <input id="airport" name="airport"
-        placeholder="e.g. Shenzhen Bao'an (SZX)" required>
+      <input
+        id="airport"
+        name="airport"
+        placeholder="e.g. Shenzhen Bao'an (SZX)"
+        required
+      >
 
       <label for="date">Date *</label>
       <input id="date" name="date" type="date" required>
 
       <label for="notes">Notes</label>
-      <textarea id="notes" name="notes"
-        placeholder="Write a short note"></textarea>
+      <textarea
+        id="notes"
+        name="notes"
+        placeholder="Write a short note"
+      ></textarea>
 
-      <button type="submit">Save Sighting</button>
+      <button id="submit-button" type="submit">Save Sighting</button>
       <p id="message" role="status"></p>
     </form>
   </section>
@@ -93,14 +115,31 @@
     <div id="sightings-list">Loading...</div>
   </section>
 
+  <!-- Load the Socket.io client library from our server -->
+  <script src="/socket.io/socket.io.js"></script>
+
   <script>
+    const socket = io();
+
     const form = document.querySelector("#sighting-form");
     const message = document.querySelector("#message");
     const list = document.querySelector("#sightings-list");
     const dateInput = document.querySelector("#date");
+    const submitButton = document.querySelector("#submit-button");
+    const connectionStatus = document.querySelector("#connection-status");
 
-    dateInput.value = new Date().toLocaleDateString("en-CA");
+    dateInput.value = getLocalDate();
 
+    function getLocalDate() {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+
+      return `${year}-${month}-${day}`;
+    }
+
+    // Load previously saved records from Lowdb
     async function loadSightings() {
       try {
         const response = await fetch("/data");
@@ -110,69 +149,98 @@
         }
 
         const sightings = await response.json();
-        list.replaceChildren();
-
-        if (sightings.length === 0) {
-          list.textContent = "No sightings yet. Add your first one!";
-          return;
-        }
-
-        sightings.forEach((item) => {
-          const record = document.createElement("div");
-          record.className = "record";
-
-          const title = document.createElement("h3");
-          title.textContent = item.aircraft;
-
-          const details = document.createElement("p");
-          details.textContent =
-            item.airport + " · " + item.date;
-
-          record.append(title, details);
-
-          if (item.notes) {
-            const notes = document.createElement("p");
-            notes.textContent = item.notes;
-            record.appendChild(notes);
-          }
-
-          list.appendChild(record);
-        });
+        renderSightings(sightings);
       } catch (error) {
         list.textContent = "Could not load records.";
-        console.error(error);
+        console.error("Error loading sightings:", error);
       }
     }
 
-    form.addEventListener("submit", async (event) => {
+    // Display records safely on the page
+    function renderSightings(sightings) {
+      list.replaceChildren();
+
+      if (!Array.isArray(sightings) || sightings.length === 0) {
+        list.textContent = "No sightings yet. Add your first one!";
+        return;
+      }
+
+      sightings.forEach((item) => {
+        const record = document.createElement("div");
+        record.className = "record";
+
+        const title = document.createElement("h3");
+        title.textContent = item.aircraft;
+
+        const details = document.createElement("p");
+        details.textContent = `${item.airport} · ${item.date}`;
+
+        record.append(title, details);
+
+        if (item.notes) {
+          const notes = document.createElement("p");
+          notes.textContent = item.notes;
+          record.appendChild(notes);
+        }
+
+        list.appendChild(record);
+      });
+    }
+
+    // Update the connection indicator
+    socket.on("connect", () => {
+      connectionStatus.textContent = "Connected — live updates are enabled.";
+      loadSightings();
+      console.log("Connected to Socket.io:", socket.id);
+    });
+
+    socket.on("disconnect", () => {
+      connectionStatus.textContent = "Disconnected — trying to reconnect...";
+    });
+
+    // Receive a new sighting broadcast by the server
+    socket.on("sighting-added", (newSighting) => {
+      console.log("New sighting received:", newSighting);
+
+      message.textContent = `New sighting shared: ${newSighting.aircraft}`;
+
+      // Reload the saved list so every connected browser stays in sync
+      loadSightings();
+    });
+
+    // Receive an error from the server
+    socket.on("sighting-error", (errorData) => {
+      message.textContent = errorData.message || "Could not save the sighting.";
+      submitButton.disabled = false;
+    });
+
+    // Send the new sighting to the server through Socket.io
+    form.addEventListener("submit", (event) => {
       event.preventDefault();
+
+      if (!socket.connected) {
+        message.textContent = "Not connected to the server. Please try again.";
+        return;
+      }
 
       const data = Object.fromEntries(new FormData(form).entries());
 
-      try {
-        const response = await fetch("/new-data", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(data)
-        });
+      submitButton.disabled = true;
+      message.textContent = "Saving sighting...";
 
-        const result = await response.json();
+      // Client-side emit: send the record to the server
+      socket.emit("new-sighting", data);
 
-        if (!response.ok) {
-          throw new Error(result.message || "Failed to save.");
-        }
-
-        message.textContent = result.message;
-        form.reset();
-        dateInput.value = new Date().toLocaleDateString("en-CA");
-        await loadSightings();
-      } catch (error) {
-        message.textContent = error.message;
-      }
+      form.reset();
+      dateInput.value = getLocalDate();
     });
 
+    // Re-enable the button after the server broadcasts a saved record
+    socket.on("sighting-added", () => {
+      submitButton.disabled = false;
+    });
+
+    // Initial load in case the saved records already exist
     loadSightings();
   </script>
 </body>

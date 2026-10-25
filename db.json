@@ -1,18 +1,25 @@
 {
   "sightings": [
     {
-      "id": "1792563222557",
-      "aircraft": "Airbus A250-900",
-      "airport": "SFO",
-      "date": "2026-10-21",
-      "notes": "United Airline"
+      "id": "1792915939452",
+      "aircraft": "Boeing 777-300ER",
+      "airport": "SZX",
+      "date": "2026-10-25",
+      "notes": "Air China"
     },
     {
-      "id": "1792563184994",
-      "aircraft": "Airbus A350-1000",
-      "airport": "JFK",
+      "id": "1792628854766",
+      "aircraft": "Airbus A380-800",
+      "airport": "HKG",
+      "date": "2026-10-22",
+      "notes": "Singapore Airline"
+    },
+    {
+      "id": "1792587704928",
+      "aircraft": "Concorde",
+      "airport": "CDG",
       "date": "2026-10-21",
-      "notes": ""
+      "notes": "Air France"
     }
   ]
 }
